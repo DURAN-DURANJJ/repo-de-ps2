@@ -1,0 +1,111 @@
+name: Build y publicar Play!.js
+
+# Solo se ejecuta cuando TÚ lo lanzas a mano (pestaña Actions -> Run workflow)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout (este repo, con la puerta de acceso)"
+        uses: actions/checkout@v7
+
+      - name: Checkout (código de Play!)
+        uses: actions/checkout@v7
+        with:
+          repository: jpd002/Play-
+          path: play
+          submodules: recursive
+          fetch-depth: 0
+
+      # --- Mismos pasos que el workflow oficial de Play! (build-js.yaml) ---
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 4.0.1
+
+      - name: Instalar dependencias
+        run: |
+          sudo apt update
+          sudo apt install -y ninja-build
+
+      - name: Generar proyecto CMake
+        working-directory: play
+        run: emcmake cmake --preset wasm-ninja
+
+      - name: Compilar Play!.js (WebAssembly)
+        working-directory: play
+        run: cmake --build --preset wasm-ninja-release
+
+      # Emscripten puede cambiar la versión de Node, así que la fijamos después
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20.17
+
+      - name: Compilar la web de Play!
+        working-directory: play
+        run: |
+          PLAYJS_BUILD_DIR=$GITHUB_WORKSPACE/play/build_cmake/build/wasm-ninja/Source/ui_js/Release/
+          cd js/play_browser
+          cp $PLAYJS_BUILD_DIR/Play.js ./src/
+          cp $PLAYJS_BUILD_DIR/Play.wasm ./public/
+          cp $PLAYJS_BUILD_DIR/Play.js ./public/
+          export REACT_APP_VERSION=$(git describe)
+          npm install
+          # PUBLIC_URL=. para que funcione dentro de una subcarpeta de github.io
+          PUBLIC_URL=. npm run build
+
+      # --- Montaje del sitio ---
+      - name: Montar el sitio
+        env:
+          GATE_PASSWORD: ${{ secrets.GATE_PASSWORD }}
+        run: |
+          mkdir -p site/app
+          cp -r play/js/play_browser/build/. site/app/
+
+          # GitHub Pages no permite cabeceras COOP/COEP; este service worker las añade
+          # (necesarias para SharedArrayBuffer / WebAssembly con hilos)
+          curl -sSL -o site/app/coi-serviceworker.min.js \
+            https://raw.githubusercontent.com/gzuidhof/coi-serviceworker/master/coi-serviceworker.min.js
+          test -s site/app/coi-serviceworker.min.js
+          sed -i 's|<head>|<head><script src="coi-serviceworker.min.js"></script>|' site/app/index.html
+
+          if [ -n "$GATE_PASSWORD" ]; then
+            HASH=$(printf '%s' "$GATE_PASSWORD" | sha256sum | cut -d' ' -f1)
+            sed "s|__HASH__|$HASH|" gate/index.html > site/index.html
+            sed -i "s|<head>|<head><script>try{if(sessionStorage.getItem('ps2ok')!=='1')location.replace('../')}catch(e){location.replace('../')}</script>|" site/app/index.html
+            echo "Puerta con contraseña activada"
+          else
+            cp gate/open.html site/index.html
+            echo "Sin contraseña (no hay secret GATE_PASSWORD)"
+          fi
+
+      - name: Configurar Pages
+        uses: actions/configure-pages@v5
+
+      - name: Subir sitio
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar en GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
