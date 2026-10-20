@@ -80,6 +80,12 @@ jobs:
             https://raw.githubusercontent.com/gzuidhof/coi-serviceworker/master/coi-serviceworker.min.js
           test -s site/app/coi-serviceworker.min.js
           sed -i 's|<head>|<head><script src="coi-serviceworker.min.js"></script>|' site/app/index.html
+          grep -q coi-serviceworker site/app/index.html
+
+          # Puente mando -> teclado (Play!.js solo lee el teclado)
+          cp gamepad-bridge.js site/app/gamepad-bridge.js
+          sed -i 's|</body>|<script src="gamepad-bridge.js"></script></body>|' site/app/index.html
+          grep -q gamepad-bridge.js site/app/index.html
 
           if [ -n "$GATE_PASSWORD" ]; then
             HASH=$(printf '%s' "$GATE_PASSWORD" | sha256sum | cut -d' ' -f1)
