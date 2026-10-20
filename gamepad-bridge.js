@@ -81,6 +81,7 @@
   function poll() {
     var pads = (navigator.getGamepads && navigator.getGamepads()) || [];
     var info = [];
+    checkHomeButton(pads);
     for (var p = 0; p < pads.length; p++) {
       var pad = pads[p];
       if (!pad) continue;
@@ -104,6 +105,47 @@
     requestAnimationFrame(poll);
   }
 
+  // ---- Pantalla completa ----
+  // Botón en pantalla, doble clic en el juego, y (si el navegador lo permite) botón PS/Home del mando.
+  function toggleFullscreen() {
+    var c = canvas();
+    if (!c) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else if (c.requestFullscreen) {
+      var p = c.requestFullscreen();
+      if (p && p.catch) p.catch(function () {});
+    }
+  }
+
+  function setupFullscreen() {
+    var style = document.createElement('style');
+    style.textContent =
+      '#outputCanvas:fullscreen{width:100vw!important;height:100vh!important;object-fit:contain;background:#000}' +
+      '#fsBtn{position:fixed;top:8px;right:8px;z-index:99999;padding:8px 12px;border:0;border-radius:8px;' +
+      'background:#3b82f6;color:#fff;font:14px system-ui,sans-serif;cursor:pointer;opacity:.85}';
+    document.head.appendChild(style);
+
+    var btn = document.createElement('button');
+    btn.id = 'fsBtn';
+    btn.textContent = '⛶ Pantalla completa';
+    btn.addEventListener('click', toggleFullscreen);
+    document.body.appendChild(btn);
+
+    var c = canvas();
+    if (c) c.addEventListener('dblclick', toggleFullscreen);
+  }
+
+  var psHeld = false;
+  function checkHomeButton(pads) {
+    var down = false;
+    for (var p = 0; p < pads.length; p++) {
+      if (pads[p] && pads[p].buttons[16] && pads[p].buttons[16].pressed) down = true;
+    }
+    if (down && !psHeld) toggleFullscreen();
+    psHeld = down;
+  }
+
   window.addEventListener('gamepadconnected', function (e) {
     console.log('[gamepad-bridge] mando conectado:', e.gamepad.id, 'mapping:', e.gamepad.mapping);
   });
@@ -111,6 +153,12 @@
     // Soltar todo lo que ese mando tuviera pulsado
     for (var code in held) setKey(code, false, 'pad' + e.gamepad.index);
   });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFullscreen);
+  } else {
+    setupFullscreen();
+  }
 
   requestAnimationFrame(poll);
 })();
